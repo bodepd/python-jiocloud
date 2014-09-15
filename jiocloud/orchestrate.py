@@ -96,27 +96,32 @@ class DeploymentOrchestrator(object):
         if status_type == 'puppet':
             if int(status_result) in (4, 6, 1):
                 status_dir = '/status/puppet/failed'
-                delete_dir = '/status/puppet/success'
+                delete_dirs = ['/status/puppet/success', '/status/puppet/pending']
+            elif int(status_result) == -1:
+                status_dir = '/status/puppet/pending'
+                delete_dirs = ['/status/puppet/success', '/status/puppet/failed']
             else:
                 status_dir = '/status/puppet/success'
-                delete_dir = '/status/puppet/failed'
+                delete_dirs = ['/status/puppet/failed', '/status/puppet/pending']
         elif status_type == 'validation':
             if int(status_result) == 0:
                 status_dir = '/status/validation/success'
-                delete_dir = '/status/validation/failed'
+                delete_dirs = ['/status/validation/failed']
             else:
                 status_dir = '/status/validation/failed'
-                delete_dir = '/status/validation/success'
+                delete_dirs = ['/status/validation/success']
         else:
             raise Exception('Invalid status_type:%s' % status_type)
 
         self.etcd.write('%s/%s' % (status_dir, hostname), str(time.time()))
 
-        try:
-          self.etcd.delete('%s/%s' % (delete_dir, hostname))
-          return True
-        except KeyError:
-          return False
+        for delete_dir in delete_dirs:
+            try:
+                self.etcd.delete('%s/%s' % (delete_dir, hostname))
+            except KeyError:
+                return True
+
+        return True
 
 
     def update_own_info(self, hostname, interval=60, version=None):

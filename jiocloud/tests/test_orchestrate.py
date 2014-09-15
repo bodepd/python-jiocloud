@@ -149,11 +149,19 @@ class OrchestrateTests(unittest.TestCase):
     def test_update_own_status(self):
         test_input = {
             'puppet': {'failed': [1,4,6,'1'],
-                       'success': [0, 2]},
+                       'success': [0, 2],
+                       'pending': [-1]},
             'validation': {'failed': [1, '1'],
                            'success': [0]}
         }
-        opposite_result = {'failed': 'success', 'success': 'failed'}
+        opposite_result = {
+            'puppet': {
+                'failed': ['success', 'pending'],
+                'success': ['failed', 'pending'],
+                'pending': ['success', 'failed']
+            },
+            'validation': {'failed': ['success'], 'success': ['failed']}
+        }
         for status_type,value in test_input.items():
             for status,status_results in value.items():
                 for status_result in status_results:
@@ -168,8 +176,11 @@ class OrchestrateTests(unittest.TestCase):
                         expected_write_calls = [mock.call('/status/%s/%s/testhost' %
                                                           (status_type, status),
                                                           '12345678')]
-                        expected_delete_calls = [mock.call('/status/%s/%s/testhost' %
-                                                          (status_type, opposite_result[status]))]
+                        expected_delete_calls = []
+                        for i in opposite_result[status_type][status]:
+                            expected_delete_calls.append(mock.call('/status/%s/%s/testhost' %
+                                                                   (status_type, i)))
+
                         self.assertEquals(etcd.write.call_args_list, expected_write_calls)
                         self.assertEquals(etcd.delete.call_args_list, expected_delete_calls)
 
