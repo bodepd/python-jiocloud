@@ -23,6 +23,10 @@ import time
 import urllib3
 import urlparse
 import os
+import netifaces
+import re
+import json
+import yaml
 from urllib3.exceptions import HTTPError
 
 
@@ -90,6 +94,60 @@ class DeploymentOrchestrator(object):
             return bool(self.etcd.machines)
         except (etcd.EtcdError, etcd.EtcdException, HTTPError):
             return False
+
+    # get all ip addresses for all interfaces, return a hash interface => address
+    def get_ips(self):
+        ips = {}
+        for i_name in netifaces.interfaces():
+            i_face = netifaces.ifaddresses(i_name)
+            inet_num = netifaces.AF_INET
+            if i_face.has_key(inet_num) and i_face[inet_num][0]['addr']:
+                ips[i_name] = i_face[inet_num][0]['addr']
+        return ips
+
+    # publish addresses for all services not in our ignore list
+    def publish_service(self, rolestoignore=None):
+        hostname = socket.gethostname()
+        m = re.search(r"([a-z]+)\d+-?", hostname)
+        role = m.group(1)
+        if not (rolestoignore and role in rolestoignore):
+            ips = self.get_ips()
+            self.etcd.write('/available_services/%s/%s' % (role, hostname), json.dumps(ips))
+            return ips
+        else:
+            return None
+
+    # retrieve all address information for all services, and organize into the structure:
+    # 'services::<role>::interface: [list of ips]'
+    def get_service_data(self):
+        try:
+            data = self.etcd.read('/available_services/', recursive=True)
+        except KeyError:
+            return False
+        leaves = list(data.leaves())
+        service_address_parser = {}
+        hiera_data = {}
+        for leaf in leaves:
+            role = os.path.split(os.path.split(leaf.key)[0])[1]
+            service_address_parser.setdefault(role, {})
+            for interface,address in json.loads(leaf.value).iteritems():
+                service_address_parser[role].setdefault(interface, [])
+                service_address_parser[role][interface].append(address)
+        for role,interfaces in service_address_parser.iteritems():
+            for i,addr in interfaces.iteritems():
+                hiera_data['services::%s::%s' % (role, i)] = addr
+        return hiera_data
+
+    def write_service_data_to_hiera(self, hiera_file='/etc/puppet/hiera/data/services.yaml'):
+        hiera_data = self.get_service_data()
+        try:
+            with open(hiera_file, 'w') as fp:
+                yaml.safe_dump(hiera_data, fp)
+                return hiera_data
+        except IOError, e:
+            if e.errno == errno.ENOENT:
+                return ''
+            raise
 
     def update_own_status(self, hostname, status_type, status_result):
         status_dir = '/status/%s' % status_type
@@ -256,6 +314,9 @@ def main(argv=sys.argv[1:]):
     check_single_version_parser = subparsers.add_parser('check_single_version', help="Check if the given version is the only one currently running")
     check_single_version_parser.add_argument('version', help='The version to check for')
     check_single_version_parser.add_argument('--verbose', '-v', action='store_true', help='Be verbose')
+    publish_parser = subparsers.add_parser('publish_service', help="Publish a service")
+    publish_parser = subparsers.add_parser('get_services', help="Retrieve all service data")
+    publish_parser = subparsers.add_parser('cache_services', help="Cache state of published services as hiera data")
     args = parser.parse_args(argv)
 
     do = DeploymentOrchestrator(args.host, args.port, args.discovery_token)
@@ -298,6 +359,12 @@ def main(argv=sys.argv[1:]):
                }[pending_update]
         print msg
         return pending_update
+    elif args.subcmd == 'publish_service':
+        return do.publish_service()
+    elif args.subcmd == 'get_services':
+        return do.get_service_data()
+    elif args.subcmd == 'cache_services':
+        return do.write_service_data_to_hiera()
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))

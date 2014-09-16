@@ -3,3 +3,4 @@ IPy
 mock
 python-novaclient
 PyYAML
+netifaces
