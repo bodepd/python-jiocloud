@@ -164,15 +164,23 @@ class DeploymentOrchestrator(object):
     def update_own_status(self, hostname, status_type, status_result):
         status_dir = '/status/%s' % status_type
         if status_type == 'puppet':
+            puppet_dirs = ['/status/puppet/success',
+                           '/status/puppet/pending',
+                           '/status/puppet/failed',
+                           '/status/puppet/running',
+                          ]
             if int(status_result) in (4, 6, 1):
                 status_dir = '/status/puppet/failed'
-                delete_dirs = ['/status/puppet/success', '/status/puppet/pending']
+                delete_dirs = [x for x in puppet_dirs if x != status_dir]
             elif int(status_result) == -1:
                 status_dir = '/status/puppet/pending'
-                delete_dirs = ['/status/puppet/success', '/status/puppet/failed']
+                delete_dirs = [x for x in puppet_dirs if x != status_dir]
+            elif int(status_result) == -2:
+                status_dir  = '/status/puppet/running'
+                delete_dirs = []
             else:
                 status_dir = '/status/puppet/success'
-                delete_dirs = ['/status/puppet/failed', '/status/puppet/pending']
+                delete_dirs = [x for x in puppet_dirs if x != status_dir]
         elif status_type == 'validation':
             if int(status_result) == 0:
                 status_dir = '/status/validation/success'

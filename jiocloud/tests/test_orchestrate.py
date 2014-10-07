@@ -216,15 +216,18 @@ class OrchestrateTests(unittest.TestCase):
         test_input = {
             'puppet': {'failed': [1,4,6,'1'],
                        'success': [0, 2],
-                       'pending': [-1]},
+                       'pending': [-1],
+                       'running': [-2]
+                       },
             'validation': {'failed': [1, '1'],
                            'success': [0]}
         }
         opposite_result = {
             'puppet': {
-                'failed': ['success', 'pending'],
-                'success': ['failed', 'pending'],
-                'pending': ['success', 'failed']
+                'failed': ['success', 'pending', 'running'],
+                'success': ['pending', 'failed', 'running'],
+                'pending': ['success', 'failed', 'running'],
+                'running': []
             },
             'validation': {'failed': ['success'], 'success': ['failed']}
         }
