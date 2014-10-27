@@ -14,8 +14,8 @@
 #    under the License.
 #
 import errno
-import etcd
 import mock
+import consulate
 import unittest
 import json
 from contextlib import nested
@@ -24,7 +24,7 @@ from jiocloud.orchestrate import DeploymentOrchestrator
 class OrchestrateTests(unittest.TestCase):
     def setUp(self, *args, **kwargs):
         super(OrchestrateTests, self).setUp(*args, **kwargs)
-        self.do = DeploymentOrchestrator('somehost', 10000, 'disctoken')
+        self.do = DeploymentOrchestrator('somehost', 10000)
 
     def test_local_version(self):
         open_mock = mock.mock_open(read_data='\n54\n')
@@ -90,98 +90,49 @@ class OrchestrateTests(unittest.TestCase):
             self.assertFalse(self.do.verify_hosts('', ['cp2', 'ctrl1']))
 
     def test_hosts_at_version_none(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
-            etcd.read.side_effect = KeyError
+        with mock.patch.object(self.do, '_consul') as consul:
+            consul.read.side_effect = KeyError
 
             self.assertEquals(self.do.hosts_at_version('foo'), [])
 
-    class EtcdKey(object):
-        def __init__(self, key, value=None):
-            self.key = key
-            self.value = value
-
-    class EtcdResult(object):
-        def __init__(self, children):
-            self._children = children
-            self.leaves = children
-
-        @property
-        def children(self):
-            return iter(self._children)
-
     def test_hosts_at_version_none_but_dir_exists(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
+        with mock.patch.object(self.do, '_consul') as consul:
             children = [self.EtcdKey('/running_version/foo')]
-            etcd.read.return_value = self.EtcdResult(children)
+            consul.read.return_value = self.EtcdResult(children)
 
             self.assertEquals(self.do.hosts_at_version('foo'), [])
 
     def test_hosts_at_version(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
+        with mock.patch.object(self.do, '_consul') as consul:
             children = [self.EtcdKey('/running_version/foo/node1'),
                         self.EtcdKey('/running_version/foo/node2')]
-            etcd.read.return_value = self.EtcdResult(children)
+            consul.read.return_value = self.EtcdResult(children)
 
             self.assertEquals(self.do.hosts_at_version('foo'), set(['node1',
                                                                     'node2']))
 
     def test_running_versions(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
+        with mock.patch.object(self.do, '_consul') as consul:
             children = [self.EtcdKey('/running_version/v10'),
                         self.EtcdKey('/running_version/v17'),
                         self.EtcdKey('/running_version/v18')]
-            etcd.read.return_value = self.EtcdResult(children)
+            consul.read.return_value = self.EtcdResult(children)
 
             self.assertEquals(self.do.running_versions(),
                               ['v10', 'v17', 'v18'])
 
     def test_running_versions_none(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
+        with mock.patch.object(self.do, '_consul') as consul:
             children = [self.EtcdKey('/running_version')]
-            etcd.read.return_value = self.EtcdResult(children)
+            consul.read.return_value = self.EtcdResult(children)
 
             self.assertEquals(self.do.running_versions(), [])
 
     def test_running_versions_none2(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
-            etcd.read.side_effect = KeyError
+        with mock.patch.object(self.do, '_consul') as consul:
+            consul.read.side_effect = KeyError
 
             self.assertEquals(self.do.running_versions(), [])
-
-    # test that roles to ignore works
-    # test the correct thing gets written
-    def test_publish_service(self):
-        with nested(mock.patch.object(self.do, '_etcd'),
-                    mock.patch.object(self.do, 'get_roles'),
-                    mock.patch('netifaces.interfaces'),
-                    mock.patch('socket.gethostname'),
-                    mock.patch('netifaces.ifaddresses'),
-                    ) as (etcd, get_roles, interfaces, hostname, addrs):
-            interfaces.return_value = ['lo', 'eth0']
-            hostname.return_value = 'foorole123-testid'
-            get_roles.return_value = ['foorole']
-            addrs.return_value = {2: [{'addr': '10.0.0.1'}]}
-            self.do.publish_service()
-            expected_write_calls = [mock.call('/available_services/foorole/foorole123-testid',
-                                              json.dumps({
-                                                  'lo': '10.0.0.1', 'eth0': '10.0.0.1'
-                                              }))]
-            self.assertEquals(etcd.write.call_args_list, expected_write_calls)
-
-    def test_get_service_data(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
-            kids = [self.EtcdKey('/available_services/foo/foo123-testid',
-                                 json.dumps({'lo': '10.0.0.1', 'eth0': '10.0.0.1'})),
-                    self.EtcdKey('/available_services/bar/bar123-testid',
-                                 json.dumps({'lo': '10.0.0.1', 'eth0': '10.0.0.1'})),
-                    self.EtcdKey('/available_services/bar/bar234-testid',
-                                 json.dumps({'lo': '11.0.0.1', 'eth0': '11.0.0.1'}))]
-            etcd.read.return_value = self.EtcdResult(kids)
-            self.assertEquals(self.do.get_service_data(),
-                             {u'services::bar::eth0': [u'10.0.0.1', u'11.0.0.1'],
-                              u'services::bar::lo': [u'10.0.0.1', u'11.0.0.1'],
-                              u'services::foo::eth0': [u'10.0.0.1'],
-                              u'services::foo::lo': [u'10.0.0.1']})
 
     def test_get_failures(self):
         results = {
@@ -197,16 +148,16 @@ class OrchestrateTests(unittest.TestCase):
         }
         for k,v in results.iteritems():
             for data in v:
-                with mock.patch.object(self.do, '_etcd') as etcd:
+                with mock.patch.object(self.do, '_consul') as consul:
                     def mock_read(arg):
                         if arg == '/status/puppet/failed':
                             return self.EtcdResult(data['puppet'])
                         if arg == '/status/validation/failed':
                             return self.EtcdResult(data['validation'])
                     if data == []:
-                        etcd.read.return_value = self.EtcdResult(data)
+                        consul.read.return_value = self.EtcdResult(data)
                     else:
-                        etcd.read.side_effect = mock_read
+                        consul.read.side_effect = mock_read
                     if k == 'should_pass':
                         self.assertEquals(True, self.do.get_failures(self))
                     else:
@@ -231,8 +182,8 @@ class OrchestrateTests(unittest.TestCase):
         for status_type,value in test_input.items():
             for status,status_results in value.items():
                 for status_result in status_results:
-                    with nested(mock.patch.object(self.do, '_etcd'),
-                                mock.patch('time.time')) as (etcd, time):
+                    with nested(mock.patch.object(self.do, '_consul'),
+                                mock.patch('time.time')) as (consul, time):
                         time.return_value = 12345678
 
                         self.do.update_own_status(hostname='testhost',
@@ -247,12 +198,12 @@ class OrchestrateTests(unittest.TestCase):
                             expected_delete_calls.append(mock.call('/status/%s/%s/testhost' %
                                                                    (status_type, i)))
 
-                        self.assertEquals(etcd.write.call_args_list, expected_write_calls)
-                        self.assertEquals(etcd.delete.call_args_list, expected_delete_calls)
+                        self.assertEquals(consul.write.call_args_list, expected_write_calls)
+                        self.assertEquals(consul.delete.call_args_list, expected_delete_calls)
 
     def test_update_own_info(self):
-        with nested(mock.patch.object(self.do, '_etcd'),
-                    mock.patch('time.time')) as (etcd, time):
+        with nested(mock.patch.object(self.do, '_consul'),
+                    mock.patch('time.time')) as (consul, time):
             time.return_value = 12345678
 
             self.do.update_own_info(hostname='testhost',
@@ -265,52 +216,52 @@ class OrchestrateTests(unittest.TestCase):
                                         None, dir=True,
                                         prevExist=True, ttl=70)]
 
-            self.assertEquals(etcd.write.call_args_list, expected_calls)
+            self.assertEquals(consul.write.call_args_list, expected_calls)
 
     def test_update_own_info_no_version_noop(self):
-        with nested(mock.patch.object(self.do, '_etcd'),
+        with nested(mock.patch.object(self.do, '_consul'),
                     mock.patch.object(self.do, 'local_version')
-                    ) as (etcd, local_version):
+                    ) as (consul, local_version):
             local_version.return_value = None
 
             self.do.update_own_info(hostname='testhost', interval=30)
 
-            self.assertEquals(etcd.write.call_args_list, [])
+            self.assertEquals(consul.write.call_args_list, [])
 
     def test_update_own_info_defaults_to_local_version(self):
-        with nested(mock.patch.object(self.do, '_etcd'),
+        with nested(mock.patch.object(self.do, '_consul'),
                     mock.patch.object(self.do, 'local_version')
-                    ) as (etcd, local_version):
+                    ) as (consul, local_version):
             local_version.return_value = 'v674'
 
             self.do.update_own_info(hostname='testhost', interval=30)
 
-            self.assertEquals(etcd.write.call_args[0][0],
+            self.assertEquals(consul.write.call_args[0][0],
                               '/running_version/v674')
 
     def test_ping_succesful(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
-            etcd.machines = ['foo1', 'foo2']
+        with mock.patch.object(self.do, '_consul') as consul:
+            consul.machines = ['foo1', 'foo2']
             self.assertTrue(self.do.ping())
 
     def test_ping_empty_cluster(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
-            etcd.machines = []
+        with mock.patch.object(self.do, '_consul') as consul:
+            consul.machines = []
             self.assertFalse(self.do.ping())
 
     def test_ping_failed_connection(self):
-        with mock.patch.object(self.do, '_etcd') as _etcd:
+        with mock.patch.object(self.do, '_consul') as _consul:
             machines = mock.PropertyMock()
-            machines.side_effect = etcd.EtcdException
-            type(_etcd).machines = machines
+            machines.side_effect = consul.EtcdException
+            type(_consul).machines = machines
 
             self.assertFalse(self.do.ping())
 
     def test_current_version(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
-            etcd.read.return_value = self.EtcdKey('/current_version',
-                                                  '\nv673\n')
+        with mock.patch('__main__.DeploymentOrchestrator.kv', new_callable=mock.PropertyMock) as kv:
+            kv.get.return_value = 'v673 '
             self.assertEquals(self.do.current_version(), 'v673')
+            kv.get.assert_called_with('/current_version')
 
     def test_pending_update(self):
         with nested(
@@ -348,10 +299,10 @@ class OrchestrateTests(unittest.TestCase):
                               self.do.NO_CLUE_BUT_WERE_JUST_GETTING_STARTED)
 
     def test_trigger_update(self):
-        with mock.patch.object(self.do, '_etcd') as etcd:
+        with mock.patch.object(self.do, '_consul') as consul:
             self.do.trigger_update('v673')
 
-            etcd.write.assert_called_with('/current_version', 'v673')
+            consul.write.assert_called_with('/current_version', 'v673')
 
 
 

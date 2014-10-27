@@ -4,3 +4,5 @@ mock
 python-novaclient
 PyYAML
 netifaces
+consulate
+tornado

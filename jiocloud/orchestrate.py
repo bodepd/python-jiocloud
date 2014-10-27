@@ -15,7 +15,6 @@
 #    under the License.
 #
 import argparse
-import etcd
 import errno
 import sys
 import socket
@@ -27,18 +26,8 @@ import netifaces
 import re
 import json
 import yaml
+import consulate
 from urllib3.exceptions import HTTPError
-
-
-class DiscoveryClient(etcd.Client):
-    def __init__(self, discovery_token, *args, **kwargs):
-        self.discovery_token = discovery_token
-        super(DiscoveryClient, self).__init__(*args, **kwargs)
-
-    @property
-    def key_endpoint(self):
-        return '/%s' % (self.discovery_token,)
-
 
 class DeploymentOrchestrator(object):
     UPDATE_AVAILABLE = 0
@@ -46,32 +35,24 @@ class DeploymentOrchestrator(object):
     NO_CLUE = 2
     NO_CLUE_BUT_WERE_JUST_GETTING_STARTED = 3
 
-    def __init__(self, host='127.0.0.1', port=4001, discovery_token=None):
+    def __init__(self, host='127.0.0.1', port=8500):
         self.host = host
         self.port = port
-        self.discovery_token = discovery_token
-        self._etcd = None
+        self._consul = None
+        self._kv = None
 
     @property
-    def etcd(self):
-        if not self._etcd:
-            if self.discovery_token:
-                dc = DiscoveryClient(self.discovery_token,
-                                     host='discovery.etcd.io',
-                                     port=443, protocol='https',
-                                     allow_redirect=False,
-                                     allow_reconnect=False)
-                urls = [x.value for x in dc.read('/').children]
-                conn_tuples = [(urlparse.urlparse(url).netloc.split(':')[0],
-                                self.port) for url in urls]
-            else:
-                conn_tuples = [(self.host, self.port)]
+    def consul(self):
+        if not self._consul:
+            self._consul = session = consulate.Consulate(self.host, self.port)
+        return self._consul
 
-            self._etcd = etcd.Client(host=tuple(conn_tuples))
-        return self._etcd
+    @property
+    def kv(self):
+        consul.kv
 
     def trigger_update(self, new_version):
-        self.etcd.write('/current_version', new_version)
+        self.kv.set('/current_version', new_version)
 
     def pending_update(self):
         local_version = self.local_version()
@@ -87,158 +68,79 @@ class DeploymentOrchestrator(object):
                 return self.NO_CLUE_BUT_WERE_JUST_GETTING_STARTED
 
     def current_version(self):
-        return self.etcd.read('/current_version').value.strip()
+        return str(self.kv.get('/current_version')).strip()
 
+    # TODO this does not work yet...
     def ping(self):
         try:
-            return bool(self.etcd.machines)
-        except (etcd.EtcdError, etcd.EtcdException, HTTPError):
+            return bool(self.consul.agent.members())
+        except (consul.EtcdError, consul.EtcdException, HTTPError):
             return False
-
-    # get all ip addresses for all interfaces, return a hash interface => address
-    def get_ips(self):
-        ips = {}
-        for i_name in netifaces.interfaces():
-            i_face = netifaces.ifaddresses(i_name)
-            inet_num = netifaces.AF_INET
-            if i_face.has_key(inet_num) and i_face[inet_num][0]['addr']:
-                ips[i_name] = i_face[inet_num][0]['addr']
-        return ips
-
-    def get_roles(self, service_file='/var/lib/puppet/profile_list.txt'):
-        try:
-            with open(service_file, 'r') as fp:
-                    return fp.read().strip().split("\n")
-        except IOError, e:
-            if e.errno == errno.ENOENT:
-                return []
-            raise
-
-    # publish addresses for all services not in our ignore list
-    def publish_service(self, rolestoignore=None):
-        hostname = socket.gethostname()
-        data = {}
-        roles = self.get_roles()
-        for role in roles:
-            print role
-            if not (rolestoignore and role in rolestoignore):
-                ips = self.get_ips()
-                self.etcd.write('/available_services/%s/%s' % (role, hostname), json.dumps(ips))
-                data[role] = ips
-            else:
-                return None
-        return data
-
-    # retrieve all address information for all services, and organize into the structure:
-    # 'services::<role>::interface: [list of ips]'
-    def get_service_data(self):
-        try:
-            data = self.etcd.read('/available_services/', recursive=True)
-        except KeyError:
-            return False
-        leaves = list(data.leaves)
-        service_address_parser = {}
-        hiera_data = {}
-        for leaf in leaves:
-            role = os.path.split(os.path.split(leaf.key)[0])[1]
-            service_address_parser.setdefault(role, {})
-            for interface,address in json.loads(leaf.value).iteritems():
-                service_address_parser[role].setdefault(interface, [])
-                service_address_parser[role][interface].append(address)
-        for role,interfaces in service_address_parser.iteritems():
-            for i,addr in interfaces.iteritems():
-                hiera_data['services::%s::%s' % (role, i)] = addr
-        return hiera_data
-
-    def write_service_data_to_hiera(self, hiera_file='/etc/puppet/hiera/data/services.yaml'):
-        hiera_data = self.get_service_data()
-        try:
-            with open(hiera_file, 'w') as fp:
-                yaml.safe_dump(hiera_data, fp)
-                return hiera_data
-        except IOError, e:
-            if e.errno == errno.ENOENT:
-                return ''
-            raise
 
     def update_own_status(self, hostname, status_type, status_result):
         status_dir = '/status/%s' % status_type
         if status_type == 'puppet':
             if int(status_result) in (4, 6, 1):
-                status_dir = '/status/puppet/failed'
-                delete_dirs = ['/status/puppet/success', '/status/puppet/pending']
+                self.consul.agent.check.ttl_fail('puppet')
             elif int(status_result) == -1:
-                status_dir = '/status/puppet/pending'
-                delete_dirs = ['/status/puppet/success', '/status/puppet/failed']
+                self.consul.agent.check.ttl_warn('puppet')
             else:
-                status_dir = '/status/puppet/success'
-                delete_dirs = ['/status/puppet/failed', '/status/puppet/pending']
+                self.consul.agent.check.ttl_pass('puppet')
         elif status_type == 'validation':
             if int(status_result) == 0:
-                status_dir = '/status/validation/success'
-                delete_dirs = ['/status/validation/failed']
+                self.consul.agent.check.ttl_pass('validation')
             else:
-                status_dir = '/status/validation/failed'
-                delete_dirs = ['/status/validation/success']
+                self.consul.agent.check.ttl_fail('validation')
         else:
             raise Exception('Invalid status_type:%s' % status_type)
 
-        self.etcd.write('%s/%s' % (status_dir, hostname), str(time.time()))
-
-        for delete_dir in delete_dirs:
-            try:
-                self.etcd.delete('%s/%s' % (delete_dir, hostname))
-            except KeyError:
-                return True
-
-        return True
-
-
-    def update_own_info(self, hostname, interval=60, version=None):
+    # this is not removing outdated versions?
+    def update_own_info(self, hostname, version=None):
         version = version or self.local_version()
         if not version:
             return
         version_dir = '/running_version/%s' % version
-        self.etcd.write('%s/%s' % (version_dir, hostname), str(time.time()))
-        self.etcd.write(version_dir, None, dir=True,
-                        prevExist=True, ttl=(interval*2+10))
+        self.kv['%s/%s' % (version_dir, hostname)] = str(time.time())
 
+    # this call may not scale
+    # if pulls down all host version records as
+    # a single hash
     def running_versions(self):
         try:
-            res = self.etcd.read('/running_version')
+            res = self.kv.find('/running_version')
+            return set([x.split('/')[-2] for x in res])
         except KeyError:
             return []
-        return filter(lambda x: x != 'running_version',
-                      [x.key.split('/')[-1] for x in res.children])
 
+    # this call may not scale
+    # if pulls down all host version records as
+    # a single hash
     def hosts_at_version(self, version):
         version_dir = '/running_version/%s' % (version,)
         try:
-            res = self.etcd.read(version_dir)
+            res = self.kv.find(version_dir)
         except KeyError:
             return []
-        if len(list(res.children)) == 1:
-            if list(res.children)[0].key == version_dir:
-                return []
-        return set([x.key.split('/')[-1] for x in res.children])
+        result_set = set()
+        for x in res:
+            if x.split('/')[-2] == version:
+                result_set.add(x.split('/')[-1])
+        return result_set
 
-    def get_failures(self, hosts):
-        failures = {}
-        for i in ['validation', 'puppet']:
-            try:
-                dir = '/status/%s/failed' % (i)
-                val = list(self.etcd.read(dir).leaves)
-                failures[i] = []
-                for v in val:
-                    failures[i] = [v for v in val if v.key != dir]
-            except KeyError:
-                failures[i] = []
+    def get_failures(self, hosts=False, show_warnings=False):
+        failures = self.consul.health.state('critical')
+        if hosts:
+            if len(failures) != 0: print "Failures:"
+            for x in failures:
+                print "  Node: %s, Check: %s" % (x['Node'], x['Name'])
+        if show_warnings:
+            warnings = self.consul.health.state('warning')
             if hosts:
-                for host in failures[i]:
-                    print '%s failure:%s' % (i.capitalize(), os.path.basename(host.key))
-            else:
-                print "%s failures :%s" % (i.capitalize(),len(failures[i]))
-        return len(failures['puppet']) == 0 and len(failures['validation']) == 0
+                if len(warnings) != 0: print "Warnings:"
+                for x in warnings:
+                    print "  Node: %s, Check: %s" % (x['Node'], x['Name'])
+            failures = failures + warnings
+        return len(failures) == 0
 
     def verify_hosts(self, version, hosts):
         return set(hosts).issubset(self.hosts_at_version(version))
@@ -252,11 +154,6 @@ class DeploymentOrchestrator(object):
             print 'Wanted version found:', wanted_version_found
             print 'Unwanted versions found:', ', '.join(unwanted_versions)
         return wanted_version_found and not unwanted_versions
-
-    def new_discovery_token(self, discovery_endpoint):
-        http = urllib3.PoolManager()
-        r = http.request('GET', '%snew' % (discovery_endpoint,))
-        return r.data.split('/')[-1]
 
     def local_version(self, new_value=None):
         mode = new_value is None and 'r' or 'w'
@@ -278,10 +175,8 @@ def main(argv=sys.argv[1:]):
     parser = argparse.ArgumentParser(description='Utility for '
                                                  'orchestrating updates')
     parser.add_argument('--host', type=str,
-                        default='127.0.0.1', help="etcd host")
-    parser.add_argument('--port', type=int, default=4001, help="etcd port")
-    parser.add_argument('--discovery_token', type=str,
-                        default=None, help="etcd discovery token")
+                        default='127.0.0.1', help="local consul agent")
+    parser.add_argument('--port', type=int, default=8500, help="consul port")
     subparsers = parser.add_subparsers(dest='subcmd')
 
     trigger_parser = subparsers.add_parser('trigger_update',
@@ -291,7 +186,7 @@ def main(argv=sys.argv[1:]):
     current_version_parser = subparsers.add_parser('current_version',
                                                    help='Get available version')
 
-    ping_parser = subparsers.add_parser('ping', help='Ping etcd')
+    ping_parser = subparsers.add_parser('ping', help='Ping consul')
 
     pending_update = subparsers.add_parser('pending_update',
                                            help='Check for pending update')
@@ -306,30 +201,26 @@ def main(argv=sys.argv[1:]):
     update_own_status_parser.add_argument('status_result', type=int, help="Command exit code used to derive status")
     list_failures_parser = subparsers.add_parser('get_failures', help="Return a list of every failed host. Returns the number of hosts in a failed state")
     list_failures_parser.add_argument('--hosts', action='store_true', help="list out all hosts in each state and not just the number in each state")
+    list_failures_parser.add_argument('--show_warnings', action='store_true', help="Whether to count warnings as failures")
     update_own_info_parser = subparsers.add_parser('update_own_info', help="Update host's own info")
-    update_own_info_parser.add_argument('--interval', type=int, default=60, help="Update interval")
     update_own_info_parser.add_argument('--hostname', type=str, default=socket.gethostname(),
                                         help="This system's hostname")
     update_own_info_parser.add_argument('--version', type=str,
-                                        help="Override version to report into etcd")
+                                        help="Override version to report into consul")
 
     running_versions_parser = subparsers.add_parser('running_versions', help="List currently running versions")
+    hosts_at_version_parser = subparsers.add_parser('hosts_at_version', help="List hosts at specified version")
+    hosts_at_version_parser.add_argument('version', type=str, help="Version to retrieve list of hosts for")
 
     verify_hosts_parser = subparsers.add_parser('verify_hosts', help="Verify that list of hosts are all available")
     verify_hosts_parser.add_argument('version', help="Version to look for")
 
-    new_discovery_token_parser = subparsers.add_parser('new_discovery_token', help="Get new discovery token")
-    new_discovery_token_parser.add_argument('--endpoint', default='https://discovery.etcd.io/', help='Discovery token endpoint')
-
     check_single_version_parser = subparsers.add_parser('check_single_version', help="Check if the given version is the only one currently running")
     check_single_version_parser.add_argument('version', help='The version to check for')
     check_single_version_parser.add_argument('--verbose', '-v', action='store_true', help='Be verbose')
-    publish_parser = subparsers.add_parser('publish_service', help="Publish a service")
-    publish_parser = subparsers.add_parser('get_services', help="Retrieve all service data")
-    publish_parser = subparsers.add_parser('cache_services', help="Cache state of published services as hiera data")
     args = parser.parse_args(argv)
 
-    do = DeploymentOrchestrator(args.host, args.port, args.discovery_token)
+    do = DeploymentOrchestrator(args.host, args.port)
     if args.subcmd == 'trigger_update':
         do.trigger_update(args.version)
     elif args.subcmd == 'current_version':
@@ -352,14 +243,14 @@ def main(argv=sys.argv[1:]):
         print do.local_version(args.version)
     elif args.subcmd == 'running_versions':
         print '\n'.join(do.running_versions())
-    elif args.subcmd == 'new_discovery_token':
-        print do.new_discovery_token(args.endpoint)
+    elif args.subcmd == 'hosts_at_version':
+        print '\n'.join(do.hosts_at_version(args.version))
     elif args.subcmd == 'verify_hosts':
         buffer = sys.stdin.read().strip()
         hosts = buffer.split('\n')
         return not do.verify_hosts(args.version, hosts)
     elif args.subcmd == 'get_failures':
-        return not do.get_failures(args.hosts)
+        return not do.get_failures(args.hosts, args.show_warnings)
     elif args.subcmd == 'pending_update':
         pending_update = do.pending_update()
         msg = {do.UPDATE_AVAILABLE: "Yes, there is an update pending",
@@ -369,12 +260,6 @@ def main(argv=sys.argv[1:]):
                }[pending_update]
         print msg
         return pending_update
-    elif args.subcmd == 'publish_service':
-        return do.publish_service()
-    elif args.subcmd == 'get_services':
-        return do.get_service_data()
-    elif args.subcmd == 'cache_services':
-        return do.write_service_data_to_hiera()
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv[1:]))
