@@ -211,7 +211,7 @@ if __name__ == '__main__':
     apply_parser.add_argument('--mappings', help='Path to mappings file')
     apply_parser.add_argument('--project_tag', help='Project tag')
     apply_parser.add_argument('--key_name', help='Name of key pair')
-    apply_parser.add_argument('--retry', type=int, help='Retry machine boot in case of failures')
+    apply_parser.add_argument('--retry', type=int, help='Retry machine boot in case of failures', default=-1)
     apply_parser.add_argument('--override_instance_number', help='Override number of instances of a type. Values is e.g. "cp=5:ct=2" to start 5 cp nodes, 2 ct nodes and go with defaults for the rest')
 
     delete_parser = subparsers.add_parser('delete', help='Delete a project')
