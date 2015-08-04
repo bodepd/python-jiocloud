@@ -209,8 +209,9 @@ class OrchestrateTests(unittest.TestCase):
     def test_lookup_ordered_data(self):
         with mock.patch('jiocloud.orchestrate.DeploymentOrchestrator.consul', new_callable=mock.PropertyMock) as consul:
             consul.return_value.kv.find.return_value = dict({'key':'v673'})
-            self.assertEquals(self.do.lookup_ordered_data('config_version', 'host1'), {'key':'v673'})
-            consul.return_value.kv.find.assert_called_with('/config_version/host/host1/')
+            self.assertEquals(self.do.lookup_ordered_data('config_version', 'host12'), {'key':'v673'})
+            consul.return_value.kv.find.assert_called_with('/config_version/host/host12/')
+            consul.return_value.kv.find.assert_called_with('/config_version/role/host/')
 
     def test_check_puppet(self):
         with mock.patch('jiocloud.orchestrate.DeploymentOrchestrator.consul', new_callable=mock.PropertyMock) as consul:
