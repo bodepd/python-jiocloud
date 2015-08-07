@@ -211,6 +211,13 @@ class OrchestrateTests(unittest.TestCase):
             consul.return_value.kv.find.return_value = dict({'key':'v673'})
             self.assertEquals(self.do.lookup_ordered_data('config_version', 'host1'), {'key':'v673'})
             consul.return_value.kv.find.assert_called_with('/config_version/host/host1/')
+            self.assertEquals(self.do.lookup_ordered_data('config_version', 'host1', {}), {})
+            self.assertEquals(self.do.lookup_ordered_data('config_version', 'host1', {'config_version/host/host1': {'key':'v673'}}), {'key': 'v673'})
+            self.assertEquals(self.do.lookup_ordered_data('config_version', 'host1', {
+                'config_version/host/host1':{'k1':'v1'},
+                'config_version/global':{'k2':'v2'},
+                'config_version/role/host':{'k3':'v3'}
+                 }), {'k1':'v1', 'k2':'v2', 'k3':'v3'})
 
     def test_get_lookup_hash_from_hostname(self):
         self.assertEqual(self.do.get_lookup_hash_from_hostname('host12'), [['global', ''], ['role', '/host'], ['host', '/host12']])

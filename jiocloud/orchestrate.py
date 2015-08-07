@@ -79,18 +79,25 @@ class DeploymentOrchestrator(object):
     # Allows for multiple properties(example - enable_update, enable_puppet)
     # at various levels
     ##
-    def lookup_ordered_data(self, keytype, hostname):
+    def lookup_ordered_data(self, keytype, hostname, data=None):
         order = self.get_lookup_hash_from_hostname(hostname)
         ret_dict= {}
         for x in order:
-            url = "/%s/%s%s/" % (keytype, x[0], x[1])
+            if data is None:
+                url = "/%s/%s%s/" % (keytype, x[0], x[1])
+                result = self.consul.kv.find(url)
+            else:
+                # pass in data to save the amount of calls you have
+                # to make to the k/v store. Expects that the data has
+                # been retrieved via consul.kv.find("/%s/" % data_type)
+                # and been reformated via: self.reformat_data
+                url = "%s/%s%s" % (keytype, x[0], x[1])
+                result = data.get(url)
 #             print url
-            result = self.consul.kv.find(url)
             if result is not None:
 #                 print result
                 for k in result.keys():
                     ret_dict[k.rsplit('/',1)[-1]] = result[k]
-
         return ret_dict
 
     def get_lookup_hash_from_hostname(self, name):
