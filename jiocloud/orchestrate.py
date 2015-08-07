@@ -53,19 +53,12 @@ class DeploymentOrchestrator(object):
     # add k/v for nodes,roles, or globally for either configuration state
     # or upgarde versions. This is intended to allow for different override levels
     # to control whether or not puppet runs or versions updates
-    def manage_config(self, action_type, scope, data, name=None, action="set"):
+    def manage_config(self, action_type, scope, key, data=None, name=None, action="set"):
         if not any(action_type in s for s in ['state', 'version']):
             print "Invalid action type: %s" % action_type
             return False
         if not any(scope in s for s in ['global', 'role', 'host']):
             print "Invalid scope type: %s" % scope
-            return False
-        try:
-            cdata = data.split('=')
-            key = cdata[0]
-            data = cdata[1]
-        except IndexError:
-            print "data should be of form key=value"
             return False
         if name is None and scope != 'global':
                 print 'name must be passed if scope is not global'
@@ -303,10 +296,10 @@ class DeploymentOrchestrator(object):
     # use cases. Leaving manage_config untouched to be used as raw consul editor
     ##
     def enable_puppet(self, value, scope, name, action):
-        return self.manage_config("state", scope, 'enable_puppet='+value, name, action)
+        return self.manage_config("state", scope, 'enable_puppet', value, name, action)
 
-    def set_config(self, value, scope, name, config_type="state", action="set"):
-        return self.manage_config(config_type, scope, value, name, action)
+    def set_config(self, key, value, scope, name, config_type="state", action="set"):
+        return self.manage_config(config_type, scope, key, value, name, action)
 
 def main(argv=sys.argv[1:]):
     parser = argparse.ArgumentParser(description='Utility for '
@@ -325,7 +318,8 @@ def main(argv=sys.argv[1:]):
                                           )
     config_parser.add_argument('config_type', type=str, help='Type of configuration to manage (version, state)')
     config_parser.add_argument('scope', type=str, help='Scope to which update effects (global, role, host)')
-    config_parser.add_argument('data', type=str, help='Data related to update in format key=value')
+    config_parser.add_argument('key', type=str, help='Key to set data for')
+    config_parser.add_argument('data', type=str, help='Data to set for specified key')
     config_parser.add_argument('--name', '-n', type=str, default=None, help='Name to apply updates to (host name, or role name, invalid for global)')
     config_parser.add_argument('--action', '-a', type=str, default="set", help='set or delete')
 
@@ -358,8 +352,9 @@ def main(argv=sys.argv[1:]):
 
     set_config_parser = subparsers.add_parser('set_config',
                                                    help='set/update/delete a config')
+    set_config_parser.add_argument('key', type=str, help='Key to set data for')
     set_config_parser.add_argument('value', type=str,
-                                      help='config_name=value')
+                                      help='Data to set for key')
     set_config_parser.add_argument('scope', type=str,
                                       help='scope - host / role / global')
     set_config_parser.add_argument('--action', '-a', type=str,
@@ -430,7 +425,7 @@ def main(argv=sys.argv[1:]):
     if args.subcmd == 'trigger_update':
         do.trigger_update(args.version)
     elif args.subcmd == 'manage_config':
-        print do.manage_config(args.config_type, args.scope, args.data, args.name, args.action)
+        print do.manage_config(args.config_type, args.scope, args.key, args.data, args.name, args.action)
     elif args.subcmd == 'host_data':
         print do.lookup_ordered_data(args.data_type, args.hostname)
     elif args.subcmd == 'check_puppet':
@@ -440,7 +435,7 @@ def main(argv=sys.argv[1:]):
     elif args.subcmd == 'check_config':
         print do.check_config(args.config_name, args.scope, args.name, args.config_type)
     elif args.subcmd == 'set_config':
-        print do.set_config(args.value, args.scope, args.name, args.config_type, args.action)
+        print do.set_config(args.key, args.value, args.scope, args.name, args.config_type, args.action)
     elif args.subcmd == 'current_version':
         print do.current_version()
     elif args.subcmd == 'check_single_version':
