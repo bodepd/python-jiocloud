@@ -235,12 +235,6 @@ class OrchestrateTests(unittest.TestCase):
             self.assertEquals(self.do.enable_puppet('False', 'role', 'cp','delete'), 'False')
             consul.return_value.kv.__delitem__.assert_called_with('/config_state/role/cp/enable_puppet')
 
-    def test_check_config(self):
-        with mock.patch('jiocloud.orchestrate.DeploymentOrchestrator.consul', new_callable=mock.PropertyMock) as consul:
-            consul.return_value.kv.find.return_value = dict({'enable_update':True})
-            self.assertEquals(self.do.check_config('enable_update', 'global', None), {'enable_update': True})
-            consul.return_value.kv.find.assert_called_with('/config_state/global/enable_update')
-
     def test_set_config(self):
         with mock.patch('jiocloud.orchestrate.DeploymentOrchestrator.consul', new_callable=mock.PropertyMock) as consul:
             consul.return_value.kv.find.return_value = dict({'enable_update':True})

@@ -281,16 +281,6 @@ class DeploymentOrchestrator(object):
             # If its not set, default is true
                 return 0
 
-    def check_config(self, config_name, scope, scope_param, config_type="config_state"):
-        if scope == 'global':
-            url = "/"+config_type+"/"+scope+"/"+config_name
-        else:
-            if scope_param is None:
-                print 'name must be passed if scope is not global'
-                return False
-            url = "/"+config_type+"/"+scope+"/"+scope_param+"/"+config_name
-        return self.consul.kv.find(url)
-
     ##
     # These two functions are wrapper around manage_config for some general
     # use cases. Leaving manage_config untouched to be used as raw consul editor
@@ -367,18 +357,6 @@ def main(argv=sys.argv[1:]):
                                        default="state",
                                        help='config_state / config_version')
 
-    check_config_parser = subparsers.add_parser('check_config',
-                                                   help='check a config value')
-    check_config_parser.add_argument('config_name', type=str,
-                                      help='config_name')
-    check_config_parser.add_argument('scope', type=str,
-                                      help='scope - host / role / global')
-    check_config_parser.add_argument('--name', '-n', type=str,
-                                       help='role / hostname to check data for')
-    check_config_parser.add_argument('--config_type', '-c', type=str,
-                                       default="state",
-                                       help='config_state / config_version')
-
     current_version_parser = subparsers.add_parser('current_version',
                                                    help='Get available version')
 
@@ -433,8 +411,6 @@ def main(argv=sys.argv[1:]):
         sys.exit(do.check_puppet(args.hostname))
     elif args.subcmd == 'enable_puppet':
         print do.enable_puppet(args.value, args.scope, args.name, args.action)
-    elif args.subcmd == 'check_config':
-        print do.check_config(args.config_name, args.scope, args.name, args.config_type)
     elif args.subcmd == 'set_config':
         print do.set_config(args.key, args.value, args.scope, args.name, args.config_type, args.action)
     elif args.subcmd == 'current_version':
