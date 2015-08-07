@@ -54,7 +54,7 @@ class DeploymentOrchestrator(object):
     # or upgarde versions. This is intended to allow for different override levels
     # to control whether or not puppet runs or versions updates
     def manage_config(self, action_type, scope, key, data=None, name=None, action="set"):
-        if not any(action_type in s for s in ['state', 'version']):
+        if not any(action_type in s for s in ['config_state', 'config_version']):
             print "Invalid action type: %s" % action_type
             return False
         if not any(scope in s for s in ['global', 'role', 'host']):
@@ -69,9 +69,9 @@ class DeploymentOrchestrator(object):
             else:
                 name_url = '/' + name + '/' + key
         if action == 'set':
-            self.consul.kv.set("/config_%s/%s%s" % (action_type, scope, name_url), data)
+            self.consul.kv.set("/%s/%s%s" % (action_type, scope, name_url), data)
         elif action == 'delete':
-            self.consul.kv.__delitem__("/config_%s/%s%s" % (action_type, scope, name_url))
+            self.consul.kv.__delitem__("/%s/%s%s" % (action_type, scope, name_url))
         return data
 
     ##
@@ -259,11 +259,11 @@ class DeploymentOrchestrator(object):
             raise
 
     def debug_timeout(self, version):
-        self.get_failures(True) 
+        self.get_failures(True)
         if self.hosts_at_version(version):
             print "Registered hosts in consul with key name Running_Versions are:"
             for reg_host in self.hosts_at_version(version):
-                print "   %s" % reg_host 
+                print "   %s" % reg_host
         else:
             print "No Hosts registered!"
 
@@ -281,14 +281,14 @@ class DeploymentOrchestrator(object):
             # If its not set, default is true
                 return 0
 
-    def check_config(self, config_name, scope, scope_param, config_type="state"):
+    def check_config(self, config_name, scope, scope_param, config_type="config_state"):
         if scope == 'global':
-            url = "/config_"+config_type+"/"+scope+"/"+config_name
+            url = "/"+config_type+"/"+scope+"/"+config_name
         else:
             if scope_param is None:
                 print 'name must be passed if scope is not global'
                 return False
-            url = "/config_"+config_type+"/"+scope+"/"+scope_param+"/"+config_name
+            url = "/"+config_type+"/"+scope+"/"+scope_param+"/"+config_name
         return self.consul.kv.find(url)
 
     ##
@@ -296,9 +296,9 @@ class DeploymentOrchestrator(object):
     # use cases. Leaving manage_config untouched to be used as raw consul editor
     ##
     def enable_puppet(self, value, scope, name, action):
-        return self.manage_config("state", scope, 'enable_puppet', value, name, action)
+        return self.manage_config('config_state', scope, 'enable_puppet', value, name, action)
 
-    def set_config(self, key, value, scope, name, config_type="state", action="set"):
+    def set_config(self, key, value, scope, name, config_type="config_state", action="set"):
         return self.manage_config(config_type, scope, key, value, name, action)
 
 def main(argv=sys.argv[1:]):
@@ -316,7 +316,8 @@ def main(argv=sys.argv[1:]):
     config_parser = subparsers.add_parser('manage_config',
                                           help='Update configuration action state for a fleet'
                                           )
-    config_parser.add_argument('config_type', type=str, help='Type of configuration to manage (version, state)')
+    config_parser.add_argument('config_type', type=str,
+                               help='Type of configuration to manage (config_version, config_state)')
     config_parser.add_argument('scope', type=str, help='Scope to which update effects (global, role, host)')
     config_parser.add_argument('key', type=str, help='Key to set data for')
     config_parser.add_argument('data', type=str, help='Data to set for specified key')
@@ -364,7 +365,7 @@ def main(argv=sys.argv[1:]):
                                        help='role / hostname to set data for')
     set_config_parser.add_argument('--config_type', '-c', type=str,
                                        default="state",
-                                       help='state / version')
+                                       help='config_state / config_version')
 
     check_config_parser = subparsers.add_parser('check_config',
                                                    help='check a config value')
@@ -376,7 +377,7 @@ def main(argv=sys.argv[1:]):
                                        help='role / hostname to check data for')
     check_config_parser.add_argument('--config_type', '-c', type=str,
                                        default="state",
-                                       help='state / version')
+                                       help='config_state / config_version')
 
     current_version_parser = subparsers.add_parser('current_version',
                                                    help='Get available version')
