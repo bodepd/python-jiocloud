@@ -361,6 +361,68 @@ class DeploymentOrchestrator(object):
                 results['upgrading'].append(host)
         return results
 
+    # uses enable_puppet to manage rolling upgrades
+    # TODO: use config_version keys eventually
+    def control_upgrade(self, version, instructions={}, data_type='config_state', key='enable_puppet'):
+        cv = self.current_version()
+        if cv != version:
+            # we are just getting started
+            # 1. disable all hosts
+            self.manage_config(data_type, 'global', key, data=False, action='delete')
+            # 2. trigger an update
+            self.trigger_update(version)
+        # 3. check instructions to figure out what keys to update
+        update_rules = self.upgrade_list(instructions)
+        return upgrade_from_data(upgrade_rules, data_type, key)
+
+    # take a set of host_data and a list of instructions
+    # return the set of hosts that can upgrade next
+    # instructions are of the form:
+    #   first: []
+    #       list of roles to be applied before everyone else
+    #   order_rules: {role:role}
+    #       rules about what roles depend on what other roles
+    #   rolling_rules: {global: N, role_r: N}
+    #       rules of how many should be applied at once, either globally, or for any role
+    # at the moment, these rules are applied in the following order:
+    #   1. iterate through all things listed as first, apply rolling rules for updates
+    #   2. apply order rules to figure out the order in which roles are applied
+    #   3. for each role that is applied, roll it out as specified by rolling rules
+    # NOTE: this assumes for now that the orders are applied per role, and then rolled out
+    # for each set of roles that is ready. At this time, there is no support for rolling
+    # out N at a time for each role before proceeding.
+    def upgrade_list(self, instructions):
+        status = self.upgrade_status()
+        # TODO - I still need to implement this, I was thinking that I would create
+        # a CLI tool that takes a file where I can pull rules out of, then I just want
+        # to start playing around with creating different kinds of rules.
+        # custom keys
+        updates = {}
+        return updates
+
+    # take a hash with keys: {global: True, role: [], hosts: []}
+    # TODO - the code is way easier if global just always takes true
+    # and enable puppet on those hosts so that they can upgrade
+    def upgrade_from_data(self, data, data_type, key):
+        updates = []
+        for rule, data in data.iteritems():
+            if data is True:
+                # this is for the global case (or any cases where they are no
+                # subkeys
+                url = "/%s/%s%s" % (data_type, rule, key)
+                updates.append(url)
+                self.consul.kv.set(url, True)
+            elif data is False:
+                print "data for rule %s is False, this should never happen" % rule
+            elif isinstance(data, list):
+                for i in data:
+                    url = "/%s/%s%s/%s" % (data_type, rule, i, key)
+                    updates.append(url)
+                    self.consul.kv.set(url, True)
+            else:
+                print "Ignoring rule data of unexpected type for rule: %s" % rule
+        return updates
+
 def main(argv=sys.argv[1:]):
     parser = argparse.ArgumentParser(description='Utility for '
                                                  'orchestrating updates')
