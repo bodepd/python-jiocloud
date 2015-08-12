@@ -100,8 +100,11 @@ class DeploymentOrchestrator(object):
                     ret_dict[k.rsplit('/',1)[-1]] = result[k]
         return ret_dict
 
+    def get_host_match(self, name):
+        return re.search('([a-z]+)(\d+)(-.*)?', name)
+
     def get_lookup_hash_from_hostname(self, name):
-        m = re.search('([a-z]+)(\d+)(-.*)?', name)
+        m = self.get_host_match(name)
         if m is None:
             print "Unexpected hostname format %s" % name
             return {}
