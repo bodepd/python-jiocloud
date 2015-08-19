@@ -81,7 +81,7 @@ class DeploymentOrchestrator(object):
     ##
     def lookup_ordered_data(self, keytype, hostname, data=None):
         order = self.get_lookup_hash_from_hostname(hostname)
-        ret_dict= {}
+        ret_dict = {}
         for x in order:
             if data is None:
                 url = "/%s/%s%s/" % (keytype, x[0], x[1])
@@ -282,7 +282,6 @@ class DeploymentOrchestrator(object):
         result = self.lookup_ordered_data(data_type, hostname)
         try:
             ret = str(result['enable_puppet'])
-            print ret
             if 'rue' in ret:
                 return 0
             else:
@@ -300,6 +299,10 @@ class DeploymentOrchestrator(object):
 
     def set_config(self, key, value, scope, name, config_type="config_state", action="set"):
         return self.manage_config(config_type, scope, key, value, name, action)
+
+    # get a list of all hosts at all versions
+    def hosts_at_versions(self):
+        return {ver: self.hosts_at_version(ver) for ver in self.running_versions()}
 
 def main(argv=sys.argv[1:]):
     parser = argparse.ArgumentParser(description='Utility for '
@@ -408,6 +411,7 @@ def main(argv=sys.argv[1:]):
     debug_timeout_parser = subparsers.add_parser('debug_timeout', help="Provides debug information when script gets  timed out")
     debug_timeout_parser.add_argument('version', help="Version to look for")
     check_single_version_parser.add_argument('--verbose', '-v', action='store_true', help='Be verbose')
+
     args = parser.parse_args(argv)
 
     do = DeploymentOrchestrator(args.host, args.port)

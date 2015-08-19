@@ -291,5 +291,25 @@ class OrchestrateTests(unittest.TestCase):
 
             consul.return_value.kv.set.assert_called_with('/current_version', 'v673')
 
+    def test_hosts_at_versions(self):
 
+        def hosts_at_versions_with_args(*args, **kwargs):
+            if args[0] == '1':
+                return ['host1', 'host2']
+            if args[0] == '2':
+                return ['host3', 'host4']
+            return []
 
+        with nested(
+                mock.patch.object(self.do, 'running_versions'),
+                mock.patch.object(self.do, 'hosts_at_version')
+
+                ) as (running_versions, hosts_at_version):
+
+                    hosts_at_version.side_effect = hosts_at_versions_with_args
+
+                    running_versions.return_value = []
+                    self.assertEquals(self.do.hosts_at_versions(),{})
+
+                    running_versions.return_value = {'1', '2'}
+                    self.assertEquals(self.do.hosts_at_versions(),{'1':['host1', 'host2'], '2': ['host3', 'host4']})
