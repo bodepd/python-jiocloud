@@ -278,6 +278,32 @@ class DeploymentOrchestrator(object):
             print "No Hosts registered!"
 
     def check_puppet(self, hostname):
+        check_paused_ret_code = self.check_puppet_paused(hostname)
+        if check_paused_ret_code == 0:
+            return self.check_pending(hostname)
+        else:
+            return check_paused_ret_code
+
+    # check if a host is in the pending state for orchestration
+    def check_pending(self, host):
+        result = None
+        keytype = "config_state/enable_puppet"
+        order = self.get_lookup_hash_from_hostname(host)
+        for x in order:
+            url = "%s/%s%s" % (keytype, x[0], x[1])
+            consul_result = self.consul.kv.find(url)
+            if consul_result is not None and consul_result != {}:
+                if len(consul_result) != 1:
+                    print "Found more than one result for: %s" % consul_result
+                result = consul_result.values()[0]
+        if result == 'False' or result == False:
+            return 9
+        else:
+            return 0
+
+    # check to see if a node is explicitly pasued
+    # this will override upgrade keys
+    def check_puppet_paused(self, hostname):
         data_type="config_state"
         result = self.lookup_ordered_data(data_type, hostname)
         try:
