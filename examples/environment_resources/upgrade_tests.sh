@@ -52,7 +52,7 @@ new_version="${2-v1}"
   jorc update_own_info --hostname foo3 --version $new_version
 
   #verify that there is no work left to do
-  python -m jiocloud.upgrade upgrade_status
+  python -m jiocloud.upgrade status
 }
 
 #

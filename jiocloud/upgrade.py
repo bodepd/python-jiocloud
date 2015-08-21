@@ -9,22 +9,28 @@ from orchestrate import DeploymentOrchestrator
 #
 # config file loaded from /etc/jiocloud-upgrade.json
 #
-#{
-#   'rolling-rules': {
-#       'global': '1'
-#   },
-#    'group-mappings': {
-#        'ceph': ['st.*'],
-#        'cp': ['g?cp.*']
+# {
+#    'rolling-rules': {
+#        'global': '1'
 #    },
-#    'role_order': {
-#        'cp': ['ocdb', 'oc']
-#    }
-#}
+#     'group-mappings': {
+#         'ceph': ['st.*'],
+#         'cp': ['g?cp.*']
+#     },
+#     'role_order': {
+#         'cp': ['ocdb', 'oc']
+#     }
+# }
 
 class DeploymentUpgrader(DeploymentOrchestrator):
 
-    def __init__(self, host='127.0.0.1', port=8500, key = 'config_state/enable_puppet' ,filename='/etc/jiocloud-upgrade.json'):
+    def __init__(
+        self,
+        host='127.0.0.1',
+        port=8500,
+        key='config_state/enable_puppet',
+        filename='/etc/jiocloud-upgrade.json'
+    ):
         super(DeploymentUpgrader, self).__init__(host, port)
         self.key = key
         self.config_data = self.load_config(filename)
@@ -35,7 +41,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
         """
         if os.path.isfile(filename):
             with open(filename, 'r') as fp:
-                return json.loads(fp)
+                return json.load(fp)
         else:
             return {}
 
@@ -89,17 +95,20 @@ class DeploymentUpgrader(DeploymentOrchestrator):
     #   order_rules: {role:role}
     #       rules about what roles depend on what other roles
     #   rolling_rules: {global: N, role_r: N, host: N}
-    #       rules of how many should be applied at once, either globally, or for any role
+    #       rules of how many should be applied at once, either globally,
+    #       or for any role
     #   group_mappings: {ceph: [st.*]}
     #       allows multiple roles to act like they are the same role based on
     #       the specified regex
     # at the moment, these rules are applied in the following order:
-    #   1. iterate through all things listed as first, apply rolling rules for updates
+    #   1. iterate through all things listed as first, apply rolling rules for
+    #      updates
     #   2. apply order rules to figure out the order in which roles are applied
-    #   3. for each role that is applied, roll it out as specified by rolling rules
+    #   3. for each role that is applied, roll it out as specified by rolling
+    #      rules
     #
-    # TODO: there are some pretty serious locking issues here, this method cannot run more
-    # than once at the same time
+    # TODO: there are some pretty serious locking issues here, this method
+    #       cannot run more than once at the same time
     #
     def upgrade_list(self, instructions, status):
         updates = {'roles': [], 'hosts': [], 'delete_hosts': []}
@@ -107,41 +116,46 @@ class DeploymentUpgrader(DeploymentOrchestrator):
         rolling_rules = instructions.get('rolling_rules') or self.config_data.get('rolling_rules')
         group_data = instructions.get('group_mappings') or self.config_data.get('group_mappings')
         role_order = instructions.get('role_order') or self.config_data.get('role_order')
+        pending_subrole_mappings = self.subrole_mappings(status['pending'], group_data)
+        upgrading_subrole_mappings = self.subrole_mappings(status['upgrading'], group_data)
         roles_not_allowed = self.roles_not_allowed(
             status['upgrading'],
             status['pending'],
-            role_order
+            role_order,
+            pending_subrole_mappings,
+            upgrading_subrole_mappings
         )
         role_rules = rolling_rules and rolling_rules.get('roles')
         global_num = rolling_rules and rolling_rules.get('global')
         # print "Global number is: %s" % global_num
         # iterate through all things that are pending
-        subrole_mappings = self.subrole_mappings(status['pending'], group_data)
-        for role, subrole_hash in subrole_mappings.iteritems():
+        for role, subrole_hash in pending_subrole_mappings.iteritems():
             # if the role is not allowed, then skip it
             # what about subroles?
             if role in roles_not_allowed:
                 continue
-            hosts = sum(subrole_hash.values(), [])
+            pending_hosts = sum(subrole_hash.values(), [])
+            upgrading_num = 0
+            if upgrading_subrole_mappings.get(role):
+                upgrading_num = len(
+                    sum(upgrading_subrole_mappings.get(role).values(), [])
+                )
             subroles = subrole_hash.keys()
-            # TODO supporting only role and not subrole for roles not allowed
-            # makes things way easier, I can revisit later if we need to support
-            # both
-            # print "%s %s" % (role, hosts)
-            # for every role that is still pending and that can be upgraded,
-            # figure out if we need to update any hosts of that role
-            # figure out the rolling_upgrade number
+            # TODO - hosts for subroles are not properly getting deleted
+            # b/c we are just tracking the list of hosts to know when
+            # and entire group of roles has completed
             num = role_rules and role_rules.get(role) or global_num
             if num is not None:
                 num = int(num)
-            upgrading_num = 0 if upgrading.get(role) is None else len(upgrading[role])
-            if num is None or num >= len(hosts) + upgrading_num:
-                # print "%s %s %s" % (num, hosts, upgrading_num)
+            if num is None or num >= len(pending_hosts) + upgrading_num:
+                # print "%s %s %s" % (num, pending_hosts, upgrading_num)
                 # if there is no rolling num, or num is greater than all
-                # pending and upgrading hosts, upgrade the entire role (ie: all subroles)
+                # pending and upgrading hosts, upgrade the entire role
+                # (ie: all subroles)
                 for r in subroles:
                     updates['roles'].append(r)
-                # get all hosts of the specified role, and mark them as requirig deletion
+                # get all hosts of the specified role, and mark them as
+                # requirig deletion
                 # TODO I am not 100% sure on this, the idea is that we should delete all of the
                 # hosts keys that are set if we are upgrading the roles b/c those rules might
                 # conflict with the operation that has been decided upon, I am struggling a little
@@ -158,8 +172,8 @@ class DeploymentUpgrader(DeploymentOrchestrator):
             elif upgrading_num < num:
                 num_hosts = num - upgrading_num
                 # append the first N num_hosts, sort to reduce race conditions
-                #print "%s %s" % (updates['hosts'], sorted(hosts)[:num_hosts])
-                updates['hosts'] += sorted(hosts)[:num_hosts]
+                # print "%s %s" % (updates['hosts'], sorted(hosts)[:num_hosts])
+                updates['hosts'] += sorted(pending_hosts)[:num_hosts]
             else:
                 print "No action to perform, %s of %s already upgrading" % (upgrading_num, num)
         return updates
@@ -239,7 +253,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
         data = self.consul.kv.find(self.key)
         # use that data to look up the orchestration state for all hosts
         res = self.lookup_ordered_data_from_hash(self.key, other_hosts, data)
-        #print res
+        # print res
         results['upgrading'] = []
         results['pending'] = []
         for host, value in res.iteritems():
@@ -294,12 +308,38 @@ class DeploymentUpgrader(DeploymentOrchestrator):
     def group_from_role(self, role, group_data):
         for group_name in (group_data or []):
             for regex in group_data[group_name]:
-                #print "%s %s" % (regex, role)
+                # print "%s %s" % (regex, role)
                 if re.compile(regex).match(role):
                     return group_name
         return role
 
-    def roles_not_allowed(self, upgrading_roles, pending_roles, role_deps):
+    def add_groups_to_role_list(self, mappings, roles):
+        """
+        take a list of roles and group role mappings, return
+        a list of those rules with any groups that match those
+        roles appended.
+        """
+        roles_and_groups = set(roles)
+        new_mappings = {}
+        for group, role_to_host in mappings.iteritems():
+            for role in role_to_host.keys():
+                if new_mappings.get(role):
+                    print "role: %r has more than one subgroup" % role
+                new_mappings[role] = group
+        for r in roles:
+            group = new_mappings.get(r)
+            if group is not None:
+                roles_and_groups.add(group)
+        return roles_and_groups
+
+    def roles_not_allowed(
+        self,
+        upgrading_roles,
+        pending_roles,
+        role_deps,
+        pending_subrole_mappings={},
+        upgrading_subrole_mappings={},
+    ):
         """
         Given nodes in the current upgrading and pending state along with a hash
         or role dependencies, returns a set of nodes that cannot be upgraded.
@@ -307,13 +347,17 @@ class DeploymentUpgrader(DeploymentOrchestrator):
           - upgrading_roles - all roles currently upgrading
           - pending_roles - all roles that are in pending state
           - role_deps - hash of each role to roles that it depends on.
+          - pending_subrole_mappings
+          - upgrading_subrole_mappings
           Ex:
             {compute: controller}
             would indicate that things of the compute role cannot be processed
             before the controller role.
         """
+        pending_roles_and_groups = self.add_groups_to_role_list(pending_subrole_mappings, pending_roles)
+        upgrading_roles_and_groups = self.add_groups_to_role_list(upgrading_subrole_mappings, upgrading_roles)
         return_data = set()
-        for role in pending_roles:
+        for role in pending_roles_and_groups:
             # for each out of the roles that can still be upgraded
             if role_deps is not None:
                 role_dep_list = role_deps.get(role)
@@ -324,7 +368,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
                 for role_dep in role_dep_list:
                     # if a role has dependencies defined and those dependencies
                     # have not been completed
-                    if role_dep in upgrading_roles or role_dep in pending_roles:
+                    if role_dep in upgrading_roles_and_groups or role_dep in pending_roles_and_groups:
                         return_data.add(role)
                         break
         return return_data
