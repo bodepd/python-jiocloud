@@ -7,6 +7,10 @@ that are used for provisioning of environments as well as updates/upgrades.
 
 All upgrade actions are contained in the jiocloud.upgrade module.
 
+NOTE: this means that if you want control over upgrades (ie:
+operations other than, update everything at the same time), then
+you need to use this module instead of `jorc trigger_update`.
+
 This code reads and writes keys into consul and assumes that each
 host reads those keys to determine what actions related to upgrade
 they currently need to perform. (this code will be added to
