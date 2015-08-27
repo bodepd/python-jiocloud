@@ -103,11 +103,11 @@ to only a subset of nodes.
 
 #### role\_order
 
-Specifies that certain roles cannot move into the upgrading state until
-all instances of a certain role have moved into the upgraded state.
+Specified that a role is dependent on another role or a list of
+roles.
 
     {
-      "role_order": {
+      "role_dependencies": {
         "compute": "controller"
       }
     }

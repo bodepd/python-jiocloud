@@ -17,7 +17,7 @@ from orchestrate import DeploymentOrchestrator
 #         'ceph': ['st.*'],
 #         'cp': ['g?cp.*']
 #     },
-#     'role_order': {
+#     'role_dependencies': {
 #         'cp': ['ocdb', 'oc']
 #     }
 # }
@@ -92,7 +92,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
     # take a set of host_data and a list of instructions
     # return the set of hosts that can upgrade next
     # instructions are of the form:
-    #   order_rules: {role:role}
+    #   role_dependencies: {role:role}
     #       rules about what roles depend on what other roles
     #   rolling_rules: {global: N, role_r: N, host: N}
     #       rules of how many should be applied at once, either globally,
@@ -115,7 +115,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
         upgrading = status['upgrading']
         rolling_rules = instructions.get('rolling_rules') or self.config_data.get('rolling_rules')
         group_data = instructions.get('group_mappings') or self.config_data.get('group_mappings')
-        role_order = instructions.get('role_order') or self.config_data.get('role_order')
+        role_order = instructions.get('role_dependencies') or self.config_data.get('role_dependencies')
         pending_subrole_mappings = self.subrole_mappings(status['pending'], group_data)
         upgrading_subrole_mappings = self.subrole_mappings(status['upgrading'], group_data)
         roles_not_allowed = self.roles_not_allowed(

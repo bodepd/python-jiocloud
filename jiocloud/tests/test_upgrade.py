@@ -148,7 +148,7 @@ class UpgradeTests(unittest.TestCase):
         instructions = {
             'rolling_rules': rolling_rules,
             'group_mappings': group_mappings,
-            'role_order': role_order
+            'role_dependencies': role_order
         }
         self.assertEquals(self.do.upgrade_list(instructions, status), result)
 
