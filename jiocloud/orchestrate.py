@@ -291,11 +291,16 @@ class DeploymentOrchestrator(object):
         order = self.get_lookup_hash_from_hostname(host)
         for x in order:
             url = "%s/%s%s" % (keytype, x[0], x[1])
-            consul_result = self.consul.kv.find(url)
-            if consul_result is not None and consul_result != {}:
-                if len(consul_result) != 1:
-                    print "Found more than one result for: %s" % consul_result
-                result = consul_result.values()[0]
+            response = self.consul.kv._adapter.get(self.consul.kv._build_uri([url]))
+            if response.status_code == 200:
+                consul_result = response.body
+            elif response.status_code == 404:
+                continue
+            else:
+                print "Unexpected code: %s for consul: %s" % (response.status_code, response.body)
+                # if something unexpected happens, do not upgrade
+                consul_result = {'Value': False}
+            result = consul_result['Value']
         if result == 'False' or result == False:
             return 9
         else:
@@ -314,7 +319,7 @@ class DeploymentOrchestrator(object):
                 return 9
         except KeyError:
             # If its not set, default is true
-                return 0
+            return 0
 
     ##
     # These two functions are wrapper around manage_config for some general

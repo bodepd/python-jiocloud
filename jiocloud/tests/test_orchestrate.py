@@ -20,6 +20,7 @@ import unittest
 import json
 from contextlib import nested
 from jiocloud.orchestrate import DeploymentOrchestrator
+from consulate.adapters import Response
 
 class OrchestrateTests(unittest.TestCase):
     def setUp(self, *args, **kwargs):
@@ -224,6 +225,7 @@ class OrchestrateTests(unittest.TestCase):
 
     def test_check_puppet(self):
         with mock.patch('jiocloud.orchestrate.DeploymentOrchestrator.consul', new_callable=mock.PropertyMock) as consul:
+            consul.return_value.kv._adapter.get.return_value = Response(200, {'Value': True}, '')
             consul.return_value.kv.find.return_value = dict({'enable_puppet':True})
             self.assertEquals(self.do.check_puppet('node1.jiocloud.com'), 0)
             consul.return_value.kv.find.return_value = dict({'enable_puppet':False})
