@@ -15,6 +15,10 @@ class UpgradeTests(unittest.TestCase):
     def test_lookup_ordered_data_from_hash(self):
         self.assertEquals(self.do.lookup_ordered_data_from_hash('config_version/enable_puppet', ['host1'], {'config_version/enable_puppet/host/host1': True}), {'host1': True})
 
+    def test_upgrade(self):
+        instructions = {'rollin_rules': ''}
+        self.assertRaises(ValueError, self.do.upgrade, '123', instructions)
+
     def test_upgrade_list(self):
         # when there is no data, return no data
         status = {

@@ -34,6 +34,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
         super(DeploymentUpgrader, self).__init__(host, port)
         self.key = key
         self.config_data = self.load_config(filename)
+        self.validate_instructions(self.config_data)
 
     def load_config(self, filename):
         """
@@ -56,6 +57,7 @@ class DeploymentUpgrader(DeploymentOrchestrator):
         retry=False,
         no_upgrade_till_done=False,
     ):
+        self.validate_instructions(instruction_data)
         cv = self.current_version()
         if cv != version:
             # we are just getting started
@@ -372,6 +374,17 @@ class DeploymentUpgrader(DeploymentOrchestrator):
                         return_data.add(role)
                         break
         return return_data
+
+    def validate_instructions(self, instructions):
+        """
+        Code to validate instructions passed in. Currently just checks that
+        instruction keys are valid
+        """
+        allowed_keys = ['rolling_rules', 'group_mappings', 'role_dependencies']
+        if instructions is not None:
+            for k,v in instructions.iteritems():
+                if k not in allowed_keys:
+                    raise ValueError("unexpected instruction key %s" % k)
 
 def main(argv=sys.argv[1:]):
     parser = argparse.ArgumentParser(description='Utility for '
