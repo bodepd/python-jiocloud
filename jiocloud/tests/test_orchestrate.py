@@ -20,7 +20,7 @@ import unittest
 import json
 from contextlib import nested
 from jiocloud.orchestrate import DeploymentOrchestrator
-from consulate.adapters import Response
+from consulate.api import Response
 
 class OrchestrateTests(unittest.TestCase):
     def setUp(self, *args, **kwargs):
